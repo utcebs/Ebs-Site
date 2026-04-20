@@ -32,7 +32,11 @@ function ProjectsProvider({ children }) {
 
   const refreshProjects = useCallback(async () => {
     try {
-      const { data } = await supabase.from('projects').select('*').order('project_number')
+      const fetchPromise = supabase.from('projects').select('*').order('project_number')
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('projects fetch timeout')), 5000)
+      )
+      const { data } = await Promise.race([fetchPromise, timeoutPromise])
       setProjects(data || [])
     } catch (e) {
       console.error('Failed to load projects:', e)
