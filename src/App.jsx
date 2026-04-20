@@ -20,6 +20,31 @@ import * as XLSX from 'xlsx'
 const AuthCtx = createContext(null)
 const useAuth = () => useContext(AuthCtx)
 
+// ─── Projects Cache Context ──────────────────────────────────
+// Fetches projects ONCE at app level so navigating between pages
+// never triggers a redundant Supabase call.
+const ProjectsCtx = createContext(null)
+const useProjects = () => useContext(ProjectsCtx)
+
+function ProjectsProvider({ children }) {
+  const [projects, setProjects] = useState([])
+  const [projectsLoading, setProjectsLoading] = useState(true)
+
+  const refreshProjects = useCallback(async () => {
+    const { data } = await supabase.from('projects').select('*').order('project_number')
+    setProjects(data || [])
+    setProjectsLoading(false)
+  }, [])
+
+  useEffect(() => { refreshProjects() }, [refreshProjects])
+
+  return (
+    <ProjectsCtx.Provider value={{ projects, projectsLoading, refreshProjects }}>
+      {children}
+    </ProjectsCtx.Provider>
+  )
+}
+
 function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
@@ -508,19 +533,12 @@ function Layout() {
 
 // ─── DASHBOARD (with drill-down) ────────────────────────────
 function Dashboard() {
-  const [projects, setProjects] = useState([])
-  const [loading, setLoading] = useState(true)
+  const { projects, projectsLoading } = useProjects()
   const [drillDown, setDrillDown] = useState(null) // { title, projects }
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const navigate = useNavigate()
 
-  useEffect(() => {
-    supabase.from('projects').select('*').order('project_number').then(({ data }) => {
-      setProjects(data || []); setLoading(false)
-    })
-  }, [])
-
-  if (loading) return <Spinner />
+  if (projectsLoading) return <Spinner />
 
   const total = projects.length
   const byStatus = STATUSES.map(s => ({ name: s, value: projects.filter(p => p.status === s).length })).filter(d => d.value > 0)
@@ -707,9 +725,8 @@ function Dashboard() {
 // ─── PROJECT TRACKER ────────────────────────────────────────
 function ProjectTracker() {
   const { isAdmin } = useAuth()
+  const { projects, projectsLoading, refreshProjects } = useProjects()
   const navigate = useNavigate()
-  const [projects, setProjects] = useState([])
-  const [loading, setLoading] = useState(true)
   const [editProject, setEditProject] = useState(null)
   const [showForm, setShowForm] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
@@ -719,12 +736,6 @@ function ProjectTracker() {
   const [uploading, setUploading] = useState(false)
   const [uploadMsg, setUploadMsg] = useState('')
   const fileInputRef = useRef(null)
-
-  const fetchProjects = useCallback(async () => {
-    const { data } = await supabase.from('projects').select('*').order('project_number')
-    setProjects(data || []); setLoading(false)
-  }, [])
-  useEffect(() => { fetchProjects() }, [fetchProjects])
 
   const filtered = useMemo(() => projects.filter(p => {
     if (searchTerm && !p.project_name.toLowerCase().includes(searchTerm.toLowerCase()) && !(p.business_owner || '').toLowerCase().includes(searchTerm.toLowerCase())) return false
@@ -736,10 +747,10 @@ function ProjectTracker() {
   const handleSave = async (data) => {
     if (editProject) { await supabase.from('projects').update(data).eq('id', editProject.id) }
     else { const maxNum = projects.reduce((m, p) => Math.max(m, p.project_number || 0), 0); await supabase.from('projects').insert({ ...data, project_number: maxNum + 1 }) }
-    setShowForm(false); setEditProject(null); fetchProjects()
+    setShowForm(false); setEditProject(null); refreshProjects()
   }
   const handleDelete = async () => {
-    if (deleteTarget) { await supabase.from('projects').delete().eq('id', deleteTarget.id); setDeleteTarget(null); fetchProjects() }
+    if (deleteTarget) { await supabase.from('projects').delete().eq('id', deleteTarget.id); setDeleteTarget(null); refreshProjects() }
   }
   const handleBulkUpload = async (e) => {
     const file = e.target.files?.[0]
@@ -753,7 +764,7 @@ function ProjectTracker() {
       const { error } = await supabase.from('projects').insert(toInsert)
       if (error) throw error
       setUploadMsg(`Successfully imported ${toInsert.length} projects!`)
-      fetchProjects()
+      refreshProjects()
     } catch (err) {
       setUploadMsg(`Error: ${err.message}`)
     }
@@ -761,7 +772,7 @@ function ProjectTracker() {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  if (loading) return <Spinner />
+  if (projectsLoading) return <Spinner />
 
   return <div>
     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
@@ -1397,15 +1408,10 @@ function RiskFormModal({ open, risk, onClose, onSave }) {
 
 // ─── GANTT CHART ────────────────────────────────────────────
 function GanttChartPage() {
-  const [projects, setProjects] = useState([])
-  const [loading, setLoading] = useState(true)
+  const { projects, projectsLoading } = useProjects()
   const navigate = useNavigate()
 
-  useEffect(() => {
-    supabase.from('projects').select('*').order('project_number').then(({ data }) => { setProjects(data || []); setLoading(false) })
-  }, [])
-
-  if (loading) return <Spinner />
+  if (projectsLoading) return <Spinner />
 
   const parseDate = (d) => { if (!d) return null; if (d.length === 7) return new Date(d + '-01'); return new Date(d) }
   const allDates = projects.flatMap(p => [parseDate(p.start_date), parseDate(p.end_date)]).filter(Boolean)
@@ -1629,6 +1635,21 @@ function AdminUsersPage() {
 }
 
 // ─── MAIN APP ───────────────────────────────────────────────
+// ─── Auth gate — shows full-page spinner until session is known ──
+function AppContent() {
+  const { loading } = useAuth()
+  if (loading) return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-surface-950 gap-4">
+      <div className="w-10 h-10 rounded-xl overflow-hidden bg-white flex items-center justify-center">
+        <img src="./ebs-logo.png" alt="EBS" className="w-full h-full object-contain" />
+      </div>
+      <RefreshCw className="animate-spin text-brand-500" size={24} />
+      <p className="text-surface-400 text-sm">Loading…</p>
+    </div>
+  )
+  return <Layout />
+}
+
 export default function App() {
-  return <AuthProvider><Layout /></AuthProvider>
+  return <AuthProvider><ProjectsProvider><AppContent /></ProjectsProvider></AuthProvider>
 }
