@@ -31,9 +31,14 @@ function ProjectsProvider({ children }) {
   const [projectsLoading, setProjectsLoading] = useState(true)
 
   const refreshProjects = useCallback(async () => {
-    const { data } = await supabase.from('projects').select('*').order('project_number')
-    setProjects(data || [])
-    setProjectsLoading(false)
+    try {
+      const { data } = await supabase.from('projects').select('*').order('project_number')
+      setProjects(data || [])
+    } catch (e) {
+      console.error('Failed to load projects:', e)
+    } finally {
+      setProjectsLoading(false)
+    }
   }, [])
 
   useEffect(() => { refreshProjects() }, [refreshProjects])
