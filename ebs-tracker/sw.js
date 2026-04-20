@@ -1,24 +1,7 @@
-const CACHE = 'ebs-tracker-v3';
-const ASSETS = [
-  '/worktracker/index.html',
-  '/worktracker/dashboard.html',
-  '/worktracker/log.html',
-  '/worktracker/performance.html',
-  '/worktracker/admin.html',
-  '/worktracker/tasks.html',
-  '/worktracker/css/style.css',
-  '/worktracker/js/config.js',
-  '/worktracker/js/auth.js',
-  '/worktracker/js/utils.js',
-  '/worktracker/logo.png',
-  '/worktracker/icon-192.png',
-  '/worktracker/icon-512.png',
-];
+const CACHE = 'ebs-tracker-v4';
 
 self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())
-  );
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', e => {
@@ -30,11 +13,10 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // Network first for everything — always serve latest version
+  // Network first — always serve latest version, cache as fallback
   e.respondWith(
     fetch(e.request)
       .then(response => {
-        // Update cache with fresh response
         if (response.ok) {
           const clone = response.clone();
           caches.open(CACHE).then(cache => cache.put(e.request, clone));
