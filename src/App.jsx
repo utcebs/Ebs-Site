@@ -58,16 +58,33 @@ function AuthProvider({ children }) {
   }
 
   useEffect(() => {
+    // Safety fallback — never stay stuck on loading screen
+    const timeout = setTimeout(() => setLoading(false), 5000)
+
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      await fetchProfile(session?.user?.id ?? null)
+      try {
+        setUser(session?.user ?? null)
+        await fetchProfile(session?.user?.id ?? null)
+      } catch (e) {
+        console.error('Auth init error:', e)
+      } finally {
+        clearTimeout(timeout)
+        setLoading(false)
+      }
+    }).catch(() => {
+      clearTimeout(timeout)
       setLoading(false)
     })
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_e, session) => {
-      setUser(session?.user ?? null)
-      await fetchProfile(session?.user?.id ?? null)
+      try {
+        setUser(session?.user ?? null)
+        await fetchProfile(session?.user?.id ?? null)
+      } catch (e) {
+        console.error('Auth state change error:', e)
+      }
     })
-    return () => subscription.unsubscribe()
+    return () => { subscription.unsubscribe(); clearTimeout(timeout) }
   }, [])
 
   const signIn = async (email, password) => {
@@ -1638,7 +1655,14 @@ function AdminUsersPage() {
 // ─── Auth gate — shows full-page spinner until session is known ──
 function AppContent() {
   const { loading } = useAuth()
-  if (loading) return (
+  // Belt-and-suspenders: force-show the app after 2 s even if auth never resolves
+  const [forceShow, setForceShow] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setForceShow(true), 2000)
+    return () => clearTimeout(t)
+  }, [])
+
+  if (loading && !forceShow) return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-surface-950 gap-4">
       <div className="w-10 h-10 rounded-xl overflow-hidden bg-white flex items-center justify-center">
         <img src="./ebs-logo.png" alt="EBS" className="w-full h-full object-contain" />
