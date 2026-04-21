@@ -104,8 +104,9 @@ async function syncSessionFromSupabase() {
       .maybeSingle();
 
     if (!profile) {
-      // Auth user exists but no profile — cannot log in
-      await db.auth.signOut();
+      // Auth user exists but no profile in EBS tracker context.
+      // Clear only the LOCAL tracker session — DO NOT sign out of Supabase,
+      // that would log the user out of the project website too.
       localStorage.removeItem(SESSION_KEY);
       return null;
     }
