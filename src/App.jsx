@@ -27,16 +27,15 @@ const ProjectsCtx = createContext(null)
 const useProjects = () => useContext(ProjectsCtx)
 
 function ProjectsProvider({ children }) {
+  const { loading: authLoading, user } = useAuth()
   const [projects, setProjects] = useState([])
   const [projectsLoading, setProjectsLoading] = useState(true)
 
   const refreshProjects = useCallback(async () => {
     try {
-      const fetchPromise = supabase.from('projects').select('*').order('project_number')
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('projects fetch timeout')), 5000)
-      )
-      const { data } = await Promise.race([fetchPromise, timeoutPromise])
+      setProjectsLoading(true)
+      const { data, error } = await supabase.from('projects').select('*').order('project_number')
+      if (error) throw error
       setProjects(data || [])
     } catch (e) {
       console.error('Failed to load projects:', e)
@@ -45,7 +44,11 @@ function ProjectsProvider({ children }) {
     }
   }, [])
 
-  useEffect(() => { refreshProjects() }, [refreshProjects])
+  // Wait for auth to resolve, then refetch whenever user changes
+  // (e.g. after returning from EBS tracker, the session may restore later)
+  useEffect(() => {
+    if (!authLoading) refreshProjects()
+  }, [authLoading, user?.id, refreshProjects])
 
   return (
     <ProjectsCtx.Provider value={{ projects, projectsLoading, refreshProjects }}>
