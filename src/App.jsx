@@ -33,7 +33,6 @@ function ProjectsProvider({ children }) {
 
   const refreshProjects = useCallback(async () => {
     try {
-      setProjectsLoading(true)
       const { data, error } = await supabase.from('projects').select('*').order('project_number')
       if (error) throw error
       setProjects(data || [])
@@ -44,10 +43,14 @@ function ProjectsProvider({ children }) {
     }
   }, [])
 
-  // Wait for auth to resolve, then refetch whenever user changes
-  // (e.g. after returning from EBS tracker, the session may restore later)
+  // Fetch once auth settles. Never resets projectsLoading to true on refetch —
+  // we already have old data to show, no need to flash a spinner.
   useEffect(() => {
-    if (!authLoading) refreshProjects()
+    if (authLoading) return
+    // Hard safety: loading state can never stay stuck past 6s
+    const safety = setTimeout(() => setProjectsLoading(false), 6000)
+    refreshProjects().finally(() => clearTimeout(safety))
+    return () => clearTimeout(safety)
   }, [authLoading, user?.id, refreshProjects])
 
   return (
@@ -1665,27 +1668,14 @@ function AdminUsersPage() {
 
 // ─── MAIN APP ───────────────────────────────────────────────
 // ─── Auth gate — shows full-page spinner until session is known ──
-function AppContent() {
-  const { loading } = useAuth()
-  // Belt-and-suspenders: force-show the app after 2 s even if auth never resolves
-  const [forceShow, setForceShow] = useState(false)
-  useEffect(() => {
-    const t = setTimeout(() => setForceShow(true), 2000)
-    return () => clearTimeout(t)
-  }, [])
-
-  if (loading && !forceShow) return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-surface-950 gap-4">
-      <div className="w-10 h-10 rounded-xl overflow-hidden bg-white flex items-center justify-center">
-        <img src="./ebs-logo.png" alt="EBS" className="w-full h-full object-contain" />
-      </div>
-      <RefreshCw className="animate-spin text-brand-500" size={24} />
-      <p className="text-surface-400 text-sm">Loading…</p>
-    </div>
-  )
-  return <Layout />
-}
-
 export default function App() {
-  return <AuthProvider><ProjectsProvider><AppContent /></ProjectsProvider></AuthProvider>
+  // No more loading gate — render immediately. Login page handles unauthed users,
+  // other pages handle their own loading states. No single point of failure.
+  return (
+    <AuthProvider>
+      <ProjectsProvider>
+        <Layout />
+      </ProjectsProvider>
+    </AuthProvider>
+  )
 }
