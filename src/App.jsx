@@ -30,14 +30,17 @@ function ProjectsProvider({ children }) {
   const { loading: authLoading, user } = useAuth()
   const [projects, setProjects] = useState([])
   const [projectsLoading, setProjectsLoading] = useState(true)
+  const [projectsError, setProjectsError] = useState(null)
 
   const refreshProjects = useCallback(async () => {
+    setProjectsError(null)
     try {
       const { data, error } = await supabase.from('projects').select('*').order('project_number')
       if (error) throw error
       setProjects(data || [])
     } catch (e) {
       console.error('Failed to load projects:', e)
+      setProjectsError(e.message || 'Failed to load projects')
     } finally {
       setProjectsLoading(false)
     }
@@ -54,7 +57,7 @@ function ProjectsProvider({ children }) {
   }, [authLoading, user?.id, refreshProjects])
 
   return (
-    <ProjectsCtx.Provider value={{ projects, projectsLoading, refreshProjects }}>
+    <ProjectsCtx.Provider value={{ projects, projectsLoading, projectsError, refreshProjects }}>
       {children}
     </ProjectsCtx.Provider>
   )
@@ -565,12 +568,13 @@ function Layout() {
 
 // ─── DASHBOARD (with drill-down) ────────────────────────────
 function Dashboard() {
-  const { projects, projectsLoading } = useProjects()
+  const { projects, projectsLoading, projectsError, refreshProjects } = useProjects()
   const [drillDown, setDrillDown] = useState(null) // { title, projects }
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const navigate = useNavigate()
 
   if (projectsLoading) return <Spinner />
+  if (projectsError) return <EmptyState icon={AlertCircle} title="Failed to load projects" description={projectsError} action={<button onClick={refreshProjects} className="text-brand-600 text-sm font-medium">Try again</button>} />
 
   const total = projects.length
   const byStatus = STATUSES.map(s => ({ name: s, value: projects.filter(p => p.status === s).length })).filter(d => d.value > 0)
@@ -757,7 +761,7 @@ function Dashboard() {
 // ─── PROJECT TRACKER ────────────────────────────────────────
 function ProjectTracker() {
   const { isAdmin } = useAuth()
-  const { projects, projectsLoading, refreshProjects } = useProjects()
+  const { projects, projectsLoading, projectsError, refreshProjects } = useProjects()
   const navigate = useNavigate()
   const [editProject, setEditProject] = useState(null)
   const [showForm, setShowForm] = useState(false)
@@ -805,6 +809,7 @@ function ProjectTracker() {
   }
 
   if (projectsLoading) return <Spinner />
+  if (projectsError) return <EmptyState icon={AlertCircle} title="Failed to load projects" description={projectsError} action={<button onClick={refreshProjects} className="text-brand-600 text-sm font-medium">Try again</button>} />
 
   return <div>
     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
@@ -985,14 +990,26 @@ function ProjectDetail() {
   const [tab, setTab] = useState('dashboard')
   const [showEditProject, setShowEditProject] = useState(false)
   const [dashDrill, setDashDrill] = useState(null) // { title, items, type:'milestones'|'risks' }
+  const [fetchError, setFetchError] = useState(null)
 
   const fetchAll = useCallback(async () => {
-    const [{ data: p }, { data: m }, { data: r }] = await Promise.all([
-      supabase.from('projects').select('*').eq('id', id).single(),
-      supabase.from('milestones').select('*').eq('project_id', id).order('milestone_number'),
-      supabase.from('risks').select('*').eq('project_id', id).order('risk_number'),
-    ])
-    setProject(p); setMilestones(m || []); setRisks(r || []); setLoading(false)
+    setFetchError(null)
+    try {
+      const [{ data: p, error: pe }, { data: m, error: me }, { data: r, error: re }] = await Promise.all([
+        supabase.from('projects').select('*').eq('id', id).single(),
+        supabase.from('milestones').select('*').eq('project_id', id).order('milestone_number'),
+        supabase.from('risks').select('*').eq('project_id', id).order('risk_number'),
+      ])
+      if (pe) throw pe
+      if (me) console.error('Milestones fetch error:', me)
+      if (re) console.error('Risks fetch error:', re)
+      setProject(p); setMilestones(m || []); setRisks(r || [])
+    } catch (e) {
+      console.error('ProjectDetail fetch error:', e)
+      setFetchError(e.message || 'Failed to load project data')
+    } finally {
+      setLoading(false)
+    }
   }, [id])
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -1014,6 +1031,7 @@ function ProjectDetail() {
   }
 
   if (loading) return <Spinner />
+  if (fetchError) return <EmptyState icon={AlertCircle} title="Failed to load project" description={fetchError} action={<button onClick={fetchAll} className="text-brand-600 text-sm font-medium">Try again</button>} />
   if (!project) return <EmptyState icon={FolderKanban} title="Project not found" description="This project may have been deleted." action={<Link to="/projects" className="text-brand-600 text-sm font-medium">← Back to tracker</Link>} />
 
   // Analytics
